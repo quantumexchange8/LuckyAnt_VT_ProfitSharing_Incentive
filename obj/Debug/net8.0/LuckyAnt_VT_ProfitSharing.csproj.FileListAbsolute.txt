@@ -1,0 +1,14 @@
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\bin\Debug\net8.0\LuckyAnt_VT_ProfitSharing.exe
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\bin\Debug\net8.0\LuckyAnt_VT_ProfitSharing.deps.json
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\bin\Debug\net8.0\LuckyAnt_VT_ProfitSharing.runtimeconfig.json
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\bin\Debug\net8.0\LuckyAnt_VT_ProfitSharing.dll
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\bin\Debug\net8.0\LuckyAnt_VT_ProfitSharing.pdb
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\obj\Debug\net8.0\LuckyAnt_VT_ProfitSharing.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\obj\Debug\net8.0\LuckyAnt_VT_ProfitSharing.AssemblyInfoInputs.cache
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\obj\Debug\net8.0\LuckyAnt_VT_ProfitSharing.AssemblyInfo.cs
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\obj\Debug\net8.0\LuckyAnt_VT_ProfitSharing.csproj.CoreCompileInputs.cache
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\obj\Debug\net8.0\LuckyAnt_VT_ProfitSharing.dll
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\obj\Debug\net8.0\refint\LuckyAnt_VT_ProfitSharing.dll
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\obj\Debug\net8.0\LuckyAnt_VT_ProfitSharing.pdb
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\obj\Debug\net8.0\LuckyAnt_VT_ProfitSharing.genruntimeconfig.cache
+C:\Users\Admin\Desktop\New folder\LuckyAnt_VT_ProfitSharing_Incentive\obj\Debug\net8.0\ref\LuckyAnt_VT_ProfitSharing.dll
