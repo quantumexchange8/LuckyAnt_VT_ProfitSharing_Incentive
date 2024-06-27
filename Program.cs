@@ -18,6 +18,8 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using MySqlX.XDevAPI.Common;
 using System.Xml.Linq;
+using Newtonsoft.Json;
+using System.Net;
 
 namespace LuckyAnt
 {
@@ -89,7 +91,7 @@ namespace LuckyAnt
                 using (MySqlConnection sql_conn = new MySqlConnection(conn))
                 {
                     sql_conn.Open(); // Open the connection
-                    string cnt_sub_sqlstr = $"SELECT COUNT(subscription_number) FROM subscriptions WHERE deleted_at IS NULL AND claimed_profit IS NULL AND ((status = ('Expired')) OR (status = 'Terminated')); ";
+                    string cnt_sub_sqlstr = $"SELECT COUNT(subscription_number) FROM subscriptions WHERE deleted_at IS NULL AND claimed_profit IS NULL AND trade_type = 'PAMM'; ";
                     Console.WriteLine($"cnt_sub_sqlstr: {cnt_sub_sqlstr}");
                     MySqlCommand select_cmd = new MySqlCommand(cnt_sub_sqlstr, sql_conn);
                     object result = select_cmd.ExecuteScalar();
@@ -111,21 +113,21 @@ namespace LuckyAnt
                     {
                         sql_conn.Open(); // Open the connection
                         string sub_sqlstr = $"SELECT t1.subscription_number, t1.user_id, t2.setting_rank_id, t1.meta_login, t1.id, t1.status, " +
-                                            $"t1.auto_renewal, t1.approval_date, t1.expired_date, t1.master_id, t1.termination_date " +
+                                            $"t1.auto_renewal, t1.approval_date, t1.expired_date, t1.master_id, t1.cumulative_amount, t1.max_out_amount, t1.termination_date " +
                                             $"FROM subscriptions t1 INNER JOIN users t2 ON t1.user_id = t2.id WHERE t2.deleted_at is null and t2.status = 'Active' " +
-                                            $"AND t1.deleted_at IS NULL AND t1.claimed_profit IS NULL AND t1.status IN ('Expired', 'Terminated', 'Switched') ORDER BY subscription_number asc;";
+                                            $"AND t1.deleted_at IS NULL AND t1.claimed_profit IS NULL AND t1.trade_type = 'PAMM' ORDER BY subscription_number asc;";
 
                         Console.WriteLine($"sub_sqlstr: {sub_sqlstr}");
                         MySqlCommand select_cmd = new MySqlCommand(sub_sqlstr, sql_conn);
                         MySqlDataReader reader = select_cmd.ExecuteReader();
                         while (reader.Read())
                         {
-                            //0-SubNum, 1-UserId, 2-UserRank, 3-MetaLogin, 4-SubId, 5-SubStatus, 6-RenewStatus, 7-Approval_DateTime, 8-Expired_DateTime, 9-master_id
+                            //0-SubNum, 1-UserId, 2-UserRank, 3-MetaLogin, 4-SubId, 5-SubStatus, 6-RenewStatus, 7-Approval_DateTime, 8-Expired_DateTime, 9-master_id, 10-cumulative_amt, 11-max_amt, 12-termination_date
                             object[] subsData = { reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4), reader.GetString(5), reader.GetInt64(6),
                                                 reader.IsDBNull(7) ? (object)default_time : reader.GetDateTime(7),
                                                 reader.IsDBNull(8) ? (object)default_time : reader.GetDateTime(8),
-                                                reader.GetInt64(9),
-                                                reader.IsDBNull(10) ? (object)default_time : reader.GetDateTime(10)
+                                                reader.GetInt64(9), reader.GetDouble(10), reader.GetDouble(11),
+                                                reader.IsDBNull(12) ? (object)default_time : reader.GetDateTime(12),
                                                 };
                             trading_accList.Add((ulong)reader.GetInt64(3));
                             tradingacc_strsql += $", {reader.GetInt64(3)}";
@@ -138,6 +140,8 @@ namespace LuckyAnt
                     // is have more than 1 subscriptions which are need to process
                     if (subs_List.Count > 0)
                     {
+                        List<Subscription> subscriptions = GetSubValues();
+
                         bool isMonitorInitiliaze = true;
                         bool isSuccess = false;
                         int consecutiveFailures = 0;
@@ -197,49 +201,46 @@ namespace LuckyAnt
                                 long MasterId = (long)subs[9];
                                 long UserRank = (long)subs[2];
                                 long UserId = (long)subs[1];
-                                DateTime SubApproval = (DateTime)subs[7];
-                                DateTime SubTermination = (DateTime)subs[10];
-                                DateTime SubExpiry = (SubTermination == default_time) ? (DateTime)subs[8] : SubTermination;
-                                string FundType = "RealFund";
+                                double cumulative_amt = (double)subs[10];
+                                double max_amt = (double)subs[11];
 
-                                long CountOpen = 0; long CountClosed = 0; double RawProfit = 0; double Swap = 0; double Profit = 0; double demo_fund = 0;
-                                update_opening_copytrade(UserId, Metalogin, SubNum, MasterId, SubExpiry, SubApproval);// update for easy calculate before record in db
+                                DateTime SubApproval = (DateTime)subs[7];
+                                DateTime SubTermination = (DateTime)subs[12];
+                                DateTime SubExpiry = (SubTermination == default_time) ? (DateTime)subs[8] : SubTermination;
+
+                                double RawProfit = 0; 
+                                //double Swap = 0; 
+                                double Profit = 0;
+
+                                MTRetCode check_bal_status = mManager.UserBalanceCheck((ulong)Metalogin, true, out double balance_user, out double balance_history, out double credit_user, out double credit_history);
+                                Subscription subscription_result = subscriptions.Find(x => x.meta_login == Metalogin);
+                                if (subscription_result != null)
+                                {
+                                    RawProfit = Math.Round(balance_user - subscription_result.subscription_amount, 2);
+                                    cumulative_amt = Math.Round(cumulative_amt + RawProfit, 2);
+                                }
+                                //update subscription cumulative amount, cumulative amount must not be over max amount
+                                //query below might need to be from main, then input into parameter
                                 using (MySqlConnection sql_conn = new MySqlConnection(conn))
                                 {
-                                    sql_conn.Open(); // Open the connection
-                                    string trades_sqlstr = $"SELECT COALESCE( SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END),0), COALESCE( SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END), 0), " +
-                                                        $"COALESCE( SUM(CASE WHEN status = 'closed' THEN closed_profit ELSE 0 END), 0), COALESCE( SUM(CASE WHEN status = 'closed' THEN swap ELSE 0 END), 0) " +
-                                                        $"FROM copy_trade_histories WHERE subscription_number IS NOT NULL  " +
-                                                        $"AND subscription_number = '{SubNum}' GROUP BY status; ";
-
-                                    Console.WriteLine($"trades_sqlstr : {trades_sqlstr}");
-
-                                    MySqlCommand select_cmd = new MySqlCommand(trades_sqlstr, sql_conn);
-                                    MySqlDataReader reader1 = select_cmd.ExecuteReader();
-                                    while (reader1.Read())
-                                    {
-                                        CountOpen = reader1.GetInt64(0);
-                                        CountClosed = reader1.GetInt64(1);
-                                        RawProfit = reader1.GetDouble(2);
-                                        Swap = reader1.GetDouble(3);
-                                        Profit = Math.Round(RawProfit + Swap, 2);
-
-                                        Console.WriteLine($"CountOpen : {CountOpen} - CountClosed : {CountClosed} - Raw Profit : {RawProfit} - Swap : {Swap} - Profit : {Profit}");
-                                    }
-                                    reader1.Close();
+                                    sql_conn.Open();
+                                    string sqlstr = $"UPDATE subscriptions SET cumulative_amount = {cumulative_amt}, updated_at = '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' " +
+                                         $"WHERE deleted_at is null and type = 'PAMM' and subscription_number = '{SubNum}' and user_id = {UserId} " +
+                                         $"ANDx claimed_profit IS NULL AND id > 0";
+                                    Console.WriteLine($"insert_update_subsciption_n_profit_hist 2 sqlstr : {sqlstr}");
+                                    MySqlCommand updateSub_cmd = new MySqlCommand(sqlstr, sql_conn);
+                                    updateSub_cmd.ExecuteScalar();
                                 }
 
                                 double sharing_percent = 0; double market_percent = 0; double company_percent = 0; double personal_bonus_percent = 0;
                                 retrieve_master_profit_percent(MasterId, ref sharing_percent, ref market_percent, ref company_percent, UserRank, ref personal_bonus_percent);
-                                check_fund(SubNum, ref demo_fund);
                                 double total_100 = Math.Round(sharing_percent + market_percent + company_percent, 0);
-                                if (demo_fund > 0) { FundType = "DemoFund"; }
                                 Console.WriteLine($"total_100: {total_100} - UserRank: {UserRank} - personal_bonus_percent: {personal_bonus_percent}");
                                 // three modes
                                 // --- Expired with renew
                                 if (SubStatus == "Expired" && RenewStatus == 1 && total_100 == 100) // && CountClosed > 0 && Profit > 0
                                 {
-                                    if (Profit > 0 && CountClosed > 0)
+                                    if (Profit > 0)
                                     {
                                         bool status_comment = false; long exist_deal_id = 0;// mt5 acc if no charged
                                         var existingTrade = exist_recordsList.FirstOrDefault(trade => (long)(ulong)trade[0] == Metalogin && (string)trade[1] == s_comment);
@@ -253,40 +254,34 @@ namespace LuckyAnt
 
                                         if (status_comment == false)
                                         {
-                                            MTRetCode check_bal_status = mManager.UserBalanceCheck((ulong)Metalogin, true, out double balance_user, out double balance_history, out double credit_user, out double credit_history);
                                             //MTRetCode balstatus = mManager.DealerBalance((ulong)Metalogin, (Profit*-1), (uint)CIMTDeal.EnDealAction.DEAL_BALANCE, "Settlement of Profit", out ulong deal_id);
                                             MTRetCode balstatus = MTRetCode.MT_RET_REQUEST_DONE;
                                             if (balstatus == MTRetCode.MT_RET_REQUEST_DONE)
                                             {
-                                                //long dealId; long userId; long metaLogin; double profit; double new_balance, string subNum 
                                                 long deal_id = 99999;
                                                 Console.WriteLine($"balance_user : {balance_user}");
                                                 balance_user = balance_user - Profit;
-                                                insert_update_subsciption_n_profit_hist(subs, Profit, sharing_percent, market_percent, company_percent, personal_bonus_percent, (long)deal_id, FundType);
-                                                if (FundType == "DemoFund")
-                                                {
-                                                    updateAcc((int)Metalogin, Profit);
-                                                }
+                                                insert_update_subsciption_n_profit_hist(subs, Profit, sharing_percent, market_percent, company_percent, personal_bonus_percent, (long)deal_id);
                                             }
                                         }
                                         else
                                         {
                                             // then is transaction inside recorded, supposed status is updated   
-                                            check_records_transactions_subscriptions_profit_histories(mManager, UserId, Metalogin, Profit, SubNum, exist_deal_id, subs, sharing_percent, market_percent, company_percent, personal_bonus_percent, FundType);
+                                            check_records_transactions_subscriptions_profit_histories(mManager, UserId, Metalogin, Profit, SubNum, exist_deal_id, subs, sharing_percent, market_percent, company_percent, personal_bonus_percent);
                                         }
                                         //Console.WriteLine($"get subs: {string.Join(", ", subs)}");
                                     }
                                     else
                                     {
-                                        insert_update_subsciption_n_profit_hist(subs, 0, sharing_percent, market_percent, company_percent, personal_bonus_percent, 0, FundType);
+                                        insert_update_subsciption_n_profit_hist(subs, 0, sharing_percent, market_percent, company_percent, personal_bonus_percent, 0);
                                     }
                                 }
 
                                 // --- Expired without renew
-                                if (((SubStatus == "Expired" && RenewStatus == 0) || (SubStatus == "Terminated") || (SubStatus == "Switched")) && total_100 == 100 && CountOpen == 0 && Metalogin == 457481) // && CountOpen > 0 && CountClosed > 0 && Profit > 0
+                                if (((SubStatus == "Expired" && RenewStatus == 0) || (SubStatus == "Terminated") || (SubStatus == "Switched")) && total_100 == 100) // && CountOpen > 0 && CountClosed > 0 && Profit > 0
                                 {
 
-                                    if (Profit > 0 && CountClosed > 0 && CountOpen == 0)
+                                    if (Profit > 0)
                                     {
                                         bool status_comment = false; long exist_deal_id = 0;// mt5 acc if no charged
                                         var existingTrade = exist_recordsList.FirstOrDefault(trade => (long)(ulong)trade[0] == Metalogin && (string)trade[1] == s_comment);
@@ -300,32 +295,26 @@ namespace LuckyAnt
 
                                         if (status_comment == false)
                                         {
-                                            MTRetCode check_bal_status = mManager.UserBalanceCheck((ulong)Metalogin, true, out double balance_user, out double balance_history, out double credit_user, out double credit_history);
-                                            MTRetCode balstatus = mManager.DealerBalance((ulong)Metalogin, (Profit * -1), (uint)CIMTDeal.EnDealAction.DEAL_BALANCE, "Settlement of Profit", out ulong deal_id);
-                                            //MTRetCode balstatus = MTRetCode.MT_RET_REQUEST_DONE;
+                                            //MTRetCode balstatus = mManager.DealerBalance((ulong)Metalogin, (Profit * -1), (uint)CIMTDeal.EnDealAction.DEAL_BALANCE, "Settlement of Profit", out ulong deal_id);
+                                            MTRetCode balstatus = MTRetCode.MT_RET_REQUEST_DONE;
                                             if (balstatus == MTRetCode.MT_RET_REQUEST_DONE)
                                             {
-                                                //long dealId; long userId; long metaLogin; double profit; double new_balance, string subNum 
-                                                //long deal_id = 99999;
-                                                //Console.WriteLine($"balance_user : {balance_user}");
+                                                long deal_id = 99999;
+                                                Console.WriteLine($"balance_user : {balance_user}");
                                                 balance_user = balance_user - Profit;
-                                                insert_update_subsciption_n_profit_hist(subs, Profit, sharing_percent, market_percent, company_percent, personal_bonus_percent, (long)deal_id, FundType);
-                                                if (FundType == "DemoFund")
-                                                {
-                                                    updateAcc((int)Metalogin, Profit);
-                                                }
+                                                insert_update_subsciption_n_profit_hist(subs, Profit, sharing_percent, market_percent, company_percent, personal_bonus_percent, (long)deal_id);
                                             }
                                         }
                                         else
                                         {
                                             // then is transaction inside recorded, supposed status is updated   
-                                            check_records_transactions_subscriptions_profit_histories(mManager, UserId, Metalogin, Profit, SubNum, exist_deal_id, subs, sharing_percent, market_percent, company_percent, personal_bonus_percent, FundType);
+                                            check_records_transactions_subscriptions_profit_histories(mManager, UserId, Metalogin, Profit, SubNum, exist_deal_id, subs, sharing_percent, market_percent, company_percent, personal_bonus_percent);
                                         }
 
                                     }
                                     else
                                     {
-                                        insert_update_subsciption_n_profit_hist(subs, 0, sharing_percent, market_percent, company_percent, personal_bonus_percent, 0, FundType);
+                                        insert_update_subsciption_n_profit_hist(subs, 0, sharing_percent, market_percent, company_percent, personal_bonus_percent, 0);
                                     }
                                 }
 
@@ -440,10 +429,10 @@ namespace LuckyAnt
                                                         $"'{personalRemarks}', '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}'); ";
 
                                         string WalletRemark = $"Performance Incentive(bonus_wallet) => ${profit} * {personal_bonus_percent}% * 70% = ${personal_bonus_wallet}";
-                                        insert_wallet_update_log(0, MetaLogin, UserId, personal_bonus_wallet, "bonus_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive", "RealFund");
+                                        insert_wallet_update_log(0, MetaLogin, UserId, personal_bonus_wallet, "bonus_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive");
 
                                         WalletRemark = $"Performance Incentive(e_wallet) => ${profit} * {personal_bonus_percent}% * 30% = ${personal_e_wallet}";
-                                        insert_wallet_update_log(0, MetaLogin, UserId, personal_e_wallet, "e_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive", "RealFund");
+                                        insert_wallet_update_log(0, MetaLogin, UserId, personal_e_wallet, "e_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive");
 
                                         Console.WriteLine($"insert_update_subsciption_n_profit_hist 0 sqlstr : {sqlstr}");
                                         MySqlCommand insert_cmd = new MySqlCommand(sqlstr, sql_conn);
@@ -538,10 +527,10 @@ namespace LuckyAnt
                                                                     $"'{uplineRemarks}', '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}'); ";
 
                                                     string WalletRemark = $"Performance Incentive(bonus_wallet) => ${profit} * {actualPercent}% * 70% = ${upline_bonus_wallet}";
-                                                    insert_wallet_update_log(0, MetaLogin, upline_id[cnt], upline_bonus_wallet, "bonus_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive", "RealFund");
+                                                    insert_wallet_update_log(0, MetaLogin, upline_id[cnt], upline_bonus_wallet, "bonus_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive");
 
                                                     WalletRemark = $"Performance Incentive(e_wallet) => ${profit} * {actualPercent}% * 30% = ${upline_e_wallet}";
-                                                    insert_wallet_update_log(0, MetaLogin, upline_id[cnt], upline_e_wallet, "e_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive", "RealFund");
+                                                    insert_wallet_update_log(0, MetaLogin, upline_id[cnt], upline_e_wallet, "e_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive");
 
                                                     Console.WriteLine($"insert_update_subsciption_n_profit_hist 0 sqlstr : {sqlstr}");
                                                     MySqlCommand insert_cmd = new MySqlCommand(sqlstr, sql_conn);
@@ -578,7 +567,7 @@ namespace LuckyAnt
         }
 
         private static void check_records_transactions_subscriptions_profit_histories(CIMTManagerAPI mManager, long UserId, long Metalogin, double Profit, string SubNum, long exist_deal_id, object[] subs,
-        double sharing_percent, double market_percent, double company_percent, double personal_bonus_percent, string FundType)
+        double sharing_percent, double market_percent, double company_percent, double personal_bonus_percent)
         {
             long record_cnt = 0;
             using (MySqlConnection sql_conn = new MySqlConnection(conn))
@@ -603,64 +592,12 @@ namespace LuckyAnt
                 if (result1 != null) { record_cnt = Convert.ToInt64(result1); }
                 if (record_cnt == 0 && exist_deal_id > 0)
                 {
-                    insert_update_subsciption_n_profit_hist(subs, Profit, sharing_percent, market_percent, company_percent, personal_bonus_percent, exist_deal_id, FundType);
-                    if (FundType == "DemoFund")
-                    {
-                        updateAcc((int)Metalogin, Profit);
-                    }
+                    insert_update_subsciption_n_profit_hist(subs, Profit, sharing_percent, market_percent, company_percent, personal_bonus_percent, exist_deal_id);
                 }
             }
         }
 
-        private static void update_opening_copytrade(long UserId, long Metalogin, string SubNum, long MasterId, DateTime SubExpiry, DateTime SubApproval)
-        {
-            try
-            {
-                string new_sub = "";
-                using (MySqlConnection sql_conn = new MySqlConnection(conn))
-                {
-                    sql_conn.Open(); // Open the connection
-
-                    string sqlstr = $"SELECT subscription_number from subscriptions where user_id = {UserId} and meta_login = {Metalogin} and (status = 'Active' or approval_date = '{SubExpiry.ToString("yyyy-MM-dd HH:mm:ss")}') and master_id = {MasterId} order by created_at desc limit 1";
-                    Console.WriteLine($"0  update_opening_copytrade sqlstr : {sqlstr}");
-                    MySqlCommand select_cmd = new MySqlCommand(sqlstr, sql_conn);
-                    object result = select_cmd.ExecuteScalar();
-                    if (result != null) { new_sub = Convert.ToString(result); }
-
-                    if (new_sub.Length > 0)
-                    {
-                        sqlstr = $"UPDATE copy_trade_histories SET subscription_number = '{new_sub}', updated_at = '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' WHERE user_id = {UserId} " +
-                                $"and meta_login = {Metalogin} and subscription_number = '{SubNum}' and user_type = 'subscriber' and (status = 'open' OR time_close > '{SubExpiry.ToString("yyyy-MM-dd HH:mm:ss")}') " +
-                                $"and master_id = {MasterId} and id > 0";
-                        Console.WriteLine($"1 update_opening_copytrade sqlstr : {sqlstr}");
-                        MySqlCommand update_cmd = new MySqlCommand(sqlstr, sql_conn);
-                        update_cmd.ExecuteScalar();
-                    }
-
-                    string sqlstr2 = $"SELECT subscription_number from subscriptions where user_id = {UserId} and meta_login = {Metalogin} and (status = 'Expired' AND expired_date = '{SubExpiry.ToString("yyyy-MM-dd HH:mm:ss")}') and master_id = {MasterId} order by created_at desc limit 1";
-                    Console.WriteLine($"0  update_opening_copytrade sqlstr2 : {sqlstr2}");
-                    MySqlCommand select_cmd2 = new MySqlCommand(sqlstr2, sql_conn);
-                    object result2 = select_cmd2.ExecuteScalar();
-                    if (result2 != null) { new_sub = Convert.ToString(result2); }
-
-                    if (new_sub.Length > 0)
-                    {
-                        sqlstr2 = $"UPDATE copy_trade_histories SET subscription_number = '{new_sub}', updated_at = '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' WHERE user_id = {UserId} " +
-                                $"and meta_login = {Metalogin} and subscription_number != '{new_sub}' and user_type = 'subscriber' and (status = 'closed' AND time_close <= '{SubExpiry.ToString("yyyy-MM-dd HH:mm:ss")}' AND time_open >= '{SubApproval.ToString("yyyy-MM-dd HH:mm:ss")}') " +
-                                $"and master_id = {MasterId} and id > 0";
-                        Console.WriteLine($"1 update_opening_copytrade sqlstr : {sqlstr2}");
-                        MySqlCommand update_cmd = new MySqlCommand(sqlstr2, sql_conn);
-                        update_cmd.ExecuteScalar();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Error sending message: " + ex.Message);
-            }
-        }
-
-        private static void insert_withdraw_transaction(long dealId, long userId, ulong walletId, long metaLogin, double profit, double new_balance, string subNum, string type, string transaction_type, long log_id, string fund_type)
+        private static void insert_withdraw_transaction(long dealId, long userId, ulong walletId, long metaLogin, double profit, double new_balance, string subNum, string type, string transaction_type, long log_id)
         {
             string sqlstr = "";
             try
@@ -674,14 +611,14 @@ namespace LuckyAnt
                     {
                         sqlstr = $"INSERT INTO transactions (user_id, category, transaction_type, fund_type, to_wallet_id, from_meta_login, amount, transaction_amount, " +
                              $"new_wallet_amount, status, comment, remarks, created_at) VALUES ( " +
-                             $"{userId}, 'wallet', '{transaction_type}', '{fund_type}', {walletId}, {metaLogin}, ROUND({profit},2), ROUND({profit},2), " +
+                             $"{userId}, 'wallet', '{transaction_type}', 'RealFund', {walletId}, {metaLogin}, ROUND({profit},2), ROUND({profit},2), " +
                              $"ROUND({new_balance},2), 'Success', {log_id}, '{type} For {subNum}', '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' )";
                     }
                     else
                     {
                         sqlstr = $"INSERT INTO transactions (user_id, category, transaction_type, fund_type, to_wallet_id, from_meta_login, ticket, amount, transaction_amount, " +
                              $"new_wallet_amount, status, comment, remarks, created_at) VALUES ( " +
-                             $"{userId}, 'wallet', '{transaction_type}', '{fund_type}', {walletId}, {metaLogin}, {dealId}, ROUND({profit},2), ROUND({profit},2), " +
+                             $"{userId}, 'wallet', '{transaction_type}', 'RealFund', {walletId}, {metaLogin}, {dealId}, ROUND({profit},2), ROUND({profit},2), " +
                              $"ROUND({new_balance},2), 'Success', {log_id}, '{type} For {subNum}', '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' )";
                     }
 
@@ -724,7 +661,7 @@ namespace LuckyAnt
             }
         }
 
-        private static void insert_update_subsciption_n_profit_hist(object[] sub_info, double profit, double sharing_percent, double market_percent, double company_percent, double personal_bonus_percent, long deal_id, string fund_type)
+        private static void insert_update_subsciption_n_profit_hist(object[] sub_info, double profit, double sharing_percent, double market_percent, double company_percent, double personal_bonus_percent, long deal_id)
         {
             //0-SubNum, 1-UserId, 2-UserRank, 3-MetaLogin, 4-SubId, 5-SubStatus, 6-RenewStatus, 7-Approval_DateTime, 8-Expired_DateTime, 9-master_id
             long UserId = (long)sub_info[1];
@@ -766,7 +703,7 @@ namespace LuckyAnt
                     if (profit != 0)
                     {
                         string WalletRemark = $"Profit Sharing(cash_wallet) => ${profit} * {sharing_percent}% = ${sharing_profit}";
-                        insert_wallet_update_log(deal_id, MetaLogin, UserId, sharing_profit, "cash_wallet", "ProfitSharing", WalletRemark, SubNum, "Settlement of Profit", fund_type);
+                        insert_wallet_update_log(deal_id, MetaLogin, UserId, sharing_profit, "cash_wallet", "ProfitSharing", WalletRemark, SubNum, "Settlement of Profit");
                     }
 
                     sqlstr = $"UPDATE subscriptions SET claimed_profit = 'Claimed', updated_at = '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' " +
@@ -881,26 +818,6 @@ namespace LuckyAnt
             }
         }
 
-        //private static void retrieve_market_profit_percent(string SubNum, ref double market_profit)
-        //{
-        //    try
-        //    {
-        //        using (MySqlConnection sql_conn = new MySqlConnection(conn))
-        //        {
-        //            sql_conn.Open(); // Open the connection
-        //            string sqlstr = $" SELECT COALESCE(t1.market_profit,0) FROM masters t1 JOIN subscriptions t2 ON t2.master_id = t1.id WHERE t1.deleted_at is null AND t2.subscription_number = '{SubNum}'; ";
-
-        //            Console.WriteLine($"retrieve_market_profit_percent sqlstr: {sqlstr}");
-        //            MySqlCommand select_cmd = new MySqlCommand(sqlstr, sql_conn);
-        //            market_profit = (double)select_cmd.ExecuteScalar();
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Console.WriteLine("Error sending message: " + ex.Message);
-        //    }
-        //}
-
         private static void check_fund(string SubNum, ref double demo_fund)
         {
             try
@@ -967,7 +884,7 @@ namespace LuckyAnt
             }
         }
 
-        private static void insert_wallet_update_log(long deal_id, long meta_login, long user_id, double amount, string type, string purpose, string remark, string sub_numb, string comment, string fund_type)
+        private static void insert_wallet_update_log(long deal_id, long meta_login, long user_id, double amount, string type, string purpose, string remark, string sub_numb, string comment)
         {
             try
             {
@@ -1015,7 +932,7 @@ namespace LuckyAnt
 
                     long logId = insertWallet_cmd.LastInsertedId;
 
-                    insert_withdraw_transaction((long)deal_id, user_id, WalletId, meta_login, amount, new_balance, sub_numb, comment, purpose, logId, fund_type);
+                    insert_withdraw_transaction((long)deal_id, user_id, WalletId, meta_login, amount, new_balance, sub_numb, comment, purpose, logId);
                 }
             }
             catch (Exception ex)
@@ -1096,5 +1013,39 @@ namespace LuckyAnt
             // Use string.Join to concatenate the ulong values with commas
             return string.Join(",", list);
         }
+
+        private static List<Subscription> GetSubValues()
+        {
+            string json = new WebClient().DownloadString("http://103.21.90.87:8080/serverapi/pamm/subscriber-list/24");
+
+            List<Subscription> subscriptions = JsonConvert.DeserializeObject<List<Subscription>>(json);
+
+            foreach (var subscription in subscriptions)
+            {
+                Console.WriteLine("ID: " + subscription.id);
+                Console.WriteLine("User ID: " + subscription.user_id);
+                Console.WriteLine("Trading Account ID: " + subscription.trading_account_id);
+                Console.WriteLine("Meta Login: " + subscription.meta_login);
+                Console.WriteLine("Sub Amount (USD): " + subscription.subscription_amount);
+                Console.WriteLine("master ID: " + subscription.master_id);
+                Console.WriteLine("Subscription Number: " + subscription.subscription_number.ToUpper());
+                Console.WriteLine("Status: " + subscription.status);
+                Console.WriteLine("\n");
+            }
+
+            return subscriptions;
+        }
+    }
+
+    public class Subscription
+    {
+        public long id { get; set; }
+        public long user_id { get; set; }
+        public long trading_account_id { get; set; }
+        public long meta_login { get; set; }
+        public double subscription_amount { get; set; }
+        public long master_id { get; set; }
+        public string subscription_number { get; set; }
+        public string status { get; set; }
     }
 }
