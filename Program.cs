@@ -91,7 +91,7 @@ namespace LuckyAnt
                 using (MySqlConnection sql_conn = new MySqlConnection(conn))
                 {
                     sql_conn.Open(); // Open the connection
-                    string cnt_sub_sqlstr = $"SELECT COUNT(subscription_number) FROM subscriptions WHERE deleted_at IS NULL AND claimed_profit IS NULL AND trade_type = 'PAMM'; ";
+                    string cnt_sub_sqlstr = $"SELECT COUNT(subscription_number) FROM subscriptions WHERE deleted_at IS NULL AND claimed_profit IS NULL AND type = 'PAMM'; ";
                     Console.WriteLine($"cnt_sub_sqlstr: {cnt_sub_sqlstr}");
                     MySqlCommand select_cmd = new MySqlCommand(cnt_sub_sqlstr, sql_conn);
                     object result = select_cmd.ExecuteScalar();
@@ -115,7 +115,7 @@ namespace LuckyAnt
                         string sub_sqlstr = $"SELECT t1.subscription_number, t1.user_id, t2.setting_rank_id, t1.meta_login, t1.id, t1.status, " +
                                             $"t1.auto_renewal, t1.approval_date, t1.expired_date, t1.master_id, t1.cumulative_amount, t1.max_out_amount, t1.termination_date " +
                                             $"FROM subscriptions t1 INNER JOIN users t2 ON t1.user_id = t2.id WHERE t2.deleted_at is null and t2.status = 'Active' " +
-                                            $"AND t1.deleted_at IS NULL AND t1.claimed_profit IS NULL AND t1.trade_type = 'PAMM' ORDER BY subscription_number asc;";
+                                            $"AND t1.deleted_at IS NULL AND t1.claimed_profit IS NULL AND t1.type = 'PAMM' AND t1.max_out_amount is null ORDER BY subscription_number asc;";
 
                         Console.WriteLine($"sub_sqlstr: {sub_sqlstr}");
                         MySqlCommand select_cmd = new MySqlCommand(sub_sqlstr, sql_conn);
@@ -147,7 +147,6 @@ namespace LuckyAnt
                         int consecutiveFailures = 0;
                         CIMTManagerAPI mManager = null;
                         string s_comment = $"Settlement of Profit";
-                        string m_comment = $"Management Fee";
 
                         MTRetCode status = MTRetCode.MT_RET_OK_NONE;
                         // initialize MetaTradeAPI and get from MT5 info
@@ -173,7 +172,7 @@ namespace LuckyAnt
                                 Console.WriteLine($"tradingacc_strsql: {tradingacc_strsql}");
 
                                 // check MT5 account histroy is settement charged ? 
-                                exist_records_MT5_Deal(mManager, trading_accList, s_comment, m_comment, ref exist_recordsList, ref status_mt5);
+                                exist_records_MT5_Deal(mManager, trading_accList, s_comment, ref exist_recordsList, ref status_mt5);
                                 if (status_mt5)
                                 {
                                     foreach (var record in exist_recordsList)
@@ -208,29 +207,9 @@ namespace LuckyAnt
                                 DateTime SubTermination = (DateTime)subs[12];
                                 DateTime SubExpiry = (SubTermination == default_time) ? (DateTime)subs[8] : SubTermination;
 
-                                double RawProfit = 0; 
+                                //double RawProfit = 0; 
                                 //double Swap = 0; 
                                 double Profit = 0;
-
-                                MTRetCode check_bal_status = mManager.UserBalanceCheck((ulong)Metalogin, true, out double balance_user, out double balance_history, out double credit_user, out double credit_history);
-                                Subscription subscription_result = subscriptions.Find(x => x.meta_login == Metalogin);
-                                if (subscription_result != null)
-                                {
-                                    RawProfit = Math.Round(balance_user - subscription_result.subscription_amount, 2);
-                                    cumulative_amt = Math.Round(cumulative_amt + RawProfit, 2);
-                                }
-                                //update subscription cumulative amount, cumulative amount must not be over max amount
-                                //query below might need to be from main, then input into parameter
-                                using (MySqlConnection sql_conn = new MySqlConnection(conn))
-                                {
-                                    sql_conn.Open();
-                                    string sqlstr = $"UPDATE subscriptions SET cumulative_amount = {cumulative_amt}, updated_at = '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' " +
-                                         $"WHERE deleted_at is null and type = 'PAMM' and subscription_number = '{SubNum}' and user_id = {UserId} " +
-                                         $"ANDx claimed_profit IS NULL AND id > 0";
-                                    Console.WriteLine($"insert_update_subsciption_n_profit_hist 2 sqlstr : {sqlstr}");
-                                    MySqlCommand updateSub_cmd = new MySqlCommand(sqlstr, sql_conn);
-                                    updateSub_cmd.ExecuteScalar();
-                                }
 
                                 double sharing_percent = 0; double market_percent = 0; double company_percent = 0; double personal_bonus_percent = 0;
                                 retrieve_master_profit_percent(MasterId, ref sharing_percent, ref market_percent, ref company_percent, UserRank, ref personal_bonus_percent);
@@ -254,11 +233,17 @@ namespace LuckyAnt
 
                                         if (status_comment == false)
                                         {
-                                            //MTRetCode balstatus = mManager.DealerBalance((ulong)Metalogin, (Profit*-1), (uint)CIMTDeal.EnDealAction.DEAL_BALANCE, "Settlement of Profit", out ulong deal_id);
-                                            MTRetCode balstatus = MTRetCode.MT_RET_REQUEST_DONE;
+                                            MTRetCode check_bal_status = mManager.UserBalanceCheck((ulong)Metalogin, true, out double balance_user, out double balance_history, out double credit_user, out double credit_history);
+                                            Subscription subscription_result = subscriptions.Find(x => x.meta_login == Metalogin);
+                                            if (subscription_result != null)
+                                            {
+                                                Profit = Math.Round(balance_user - subscription_result.subscription_amount, 2);
+                                            }
+                                            MTRetCode balstatus = mManager.DealerBalance((ulong)Metalogin, (Profit*-1), (uint)CIMTDeal.EnDealAction.DEAL_BALANCE, "Settlement of Profit", out ulong deal_id);
+                                            //MTRetCode balstatus = MTRetCode.MT_RET_REQUEST_DONE;
                                             if (balstatus == MTRetCode.MT_RET_REQUEST_DONE)
                                             {
-                                                long deal_id = 99999;
+                                                //long deal_id = 99999;
                                                 Console.WriteLine($"balance_user : {balance_user}");
                                                 balance_user = balance_user - Profit;
                                                 insert_update_subsciption_n_profit_hist(subs, Profit, sharing_percent, market_percent, company_percent, personal_bonus_percent, (long)deal_id);
@@ -295,11 +280,17 @@ namespace LuckyAnt
 
                                         if (status_comment == false)
                                         {
-                                            //MTRetCode balstatus = mManager.DealerBalance((ulong)Metalogin, (Profit * -1), (uint)CIMTDeal.EnDealAction.DEAL_BALANCE, "Settlement of Profit", out ulong deal_id);
-                                            MTRetCode balstatus = MTRetCode.MT_RET_REQUEST_DONE;
+                                            MTRetCode check_bal_status = mManager.UserBalanceCheck((ulong)Metalogin, true, out double balance_user, out double balance_history, out double credit_user, out double credit_history);
+                                            Subscription subscription_result = subscriptions.Find(x => x.meta_login == Metalogin);
+                                            if (subscription_result != null)
+                                            {
+                                                Profit = Math.Round(balance_user - subscription_result.subscription_amount, 2);
+                                            }
+                                            MTRetCode balstatus = mManager.DealerBalance((ulong)Metalogin, (Profit * -1), (uint)CIMTDeal.EnDealAction.DEAL_BALANCE, "Settlement of Profit", out ulong deal_id);
+                                            //MTRetCode balstatus = MTRetCode.MT_RET_REQUEST_DONE;
                                             if (balstatus == MTRetCode.MT_RET_REQUEST_DONE)
                                             {
-                                                long deal_id = 99999;
+                                                //long deal_id = 99999;
                                                 Console.WriteLine($"balance_user : {balance_user}");
                                                 balance_user = balance_user - Profit;
                                                 insert_update_subsciption_n_profit_hist(subs, Profit, sharing_percent, market_percent, company_percent, personal_bonus_percent, (long)deal_id);
@@ -343,7 +334,7 @@ namespace LuckyAnt
                     // subsription_batches, count if terminated
 
                     string cnt_batch_sqlstr = $"SELECT COUNT(t1.id) FROM subscriptions_profit_histories t1 JOIN subscriptions t2 ON t1.subscription_id = t2.id " +
-                        $"JOIN masters t3 ON t2.master_id = t3.id WHERE t1.total_profit != 0 AND t1.deleted_at IS NULL AND " +
+                        $"JOIN masters t3 ON t2.master_id = t3.id WHERE t1.total_profit != 0 AND t1.deleted_at IS NULL AND t2.type = 'PAMM' AND " +
                         $"t3.market_profit != 0 AND t1.subscription_id NOT IN (SELECT subscription_id FROM performance_incentive); ";
                     //string cnt_batch_sqlstr = $"SELECT COUNT(id) FROM subscriptions_profit_histories WHERE total_profit != 0 AND deleted_at IS NULL AND " +
                     //    $"subscription_id NOT IN (SELECT subscription_id FROM performance_incentive); ";
@@ -365,8 +356,10 @@ namespace LuckyAnt
                     {
                         sql_conn.Open(); // Open the connection
 
-                        string sqlstr = $"SELECT t1.total_profit, t1.profit_bonus_percent, t1.user_rank, t1.user_id, t1.subscription_number, t1.subscription_id, t1.meta_login, t2.expired_date " +
-                            $"FROM subscriptions_profit_histories t1 JOIN subscriptions t2 ON t1.subscription_id = t2.id JOIN masters t3 ON t2.master_id = t3.id WHERE t1.total_profit != 0 AND " +
+                        string sqlstr = $"SELECT t1.total_profit, t1.profit_bonus_percent, t1.user_rank, t1.user_id, t1.subscription_number, t1.subscription_id, t1.meta_login, " +
+                            $"t2.expired_date, t2.cumulative_amount, t2.max_out_amount " +
+                            $"FROM subscriptions_profit_histories t1 JOIN subscriptions t2 ON t1.subscription_id = t2.id JOIN masters t3 ON t2.master_id = t3.id " +
+                            $"WHERE t1.total_profit != 0 AND t2.type = 'PAMM'" +
                             $"t3.market_profit != 0 AND t1.subscription_id NOT IN (SELECT subscription_id FROM performance_incentive);";
                         //string sqlstr = $"SELECT t1.total_profit, t1.profit_bonus_percent, t1.user_rank, t1.user_id, t1.subscription_number, t1.subscription_id, t1.meta_login, t2.expired_date " +
                         //    $"FROM subscriptions_profit_histories t1 JOIN subscriptions t2 ON t1.subscription_id = t2.id WHERE total_profit != 0 AND " +
@@ -376,9 +369,9 @@ namespace LuckyAnt
                         MySqlDataReader reader = select_cmd.ExecuteReader();
                         while (reader.Read())
                         {
-                            //0-profit, 1-personal_bonus_percent, 2-UserRank, 3-UserId, 4-SubNum, 5-SubId, 6-MetaLogin, 7-ExpiredDate
+                            //0-profit, 1-personal_bonus_percent, 2-UserRank, 3-UserId, 4-SubNum, 5-SubId, 6-MetaLogin, 7-ExpiredDate, 8-CumulativeAmt, 9-MaxAmt
                             object[] batchData = { reader.GetDouble(0), reader.GetDouble(1), reader.GetInt64(2), reader.GetInt64(3),
-                                reader.GetString(4), reader.GetInt64(5), reader.GetInt32(6), reader.GetDateTime(7) };
+                                reader.GetString(4), reader.GetInt64(5), reader.GetInt32(6), reader.GetDateTime(7), reader.GetDouble(8), reader.GetDouble(9) };
 
                             subs_List.Add(batchData);
                         }
@@ -397,45 +390,58 @@ namespace LuckyAnt
                             long SubId = (long)subs[5];
                             int MetaLogin = (int)subs[6];
                             DateTime ExpiredDate = (DateTime)subs[7];
+                            double cumulative_amt = (double)subs[8];
+                            double max_amt = (double)subs[9];
                             //double market_profit = 0;
-                            double demo_fund = 0;
+
                             Console.WriteLine($"===================================== Subscription - {SubNum} =============================");
                             //retrieve_market_profit_percent(SubNum, ref market_profit);
-                            check_fund(SubNum, ref demo_fund);
 
                             if (profit != 0)
                             {
-                                if (demo_fund != 0)
-                                {
-                                    Console.WriteLine("Detected Demo Fund for this sub.");
-                                    continue;
-                                }
                                 if (personal_bonus_percent > 0)
                                 {
                                     using (MySqlConnection sql_conn = new MySqlConnection(conn))
                                     {
                                         double personal_bonus_profit = Math.Round(profit * (personal_bonus_percent / 100), 2);
-                                        double personal_bonus_wallet = Math.Round(personal_bonus_profit * 70 / 100, 2);
-                                        double personal_e_wallet = Math.Round(personal_bonus_profit - personal_bonus_wallet, 2);
 
-                                        sql_conn.Open(); // Open the connection
-                                        string personalRemarks = $"Performance Incentive Bonus from {SubNum} of {personal_bonus_percent}% : ${Math.Round(personal_bonus_profit, 2)}";
-                                        Console.WriteLine($"Personal Remark : {personalRemarks}");
+                                        double bonusToAdd = Math.Min(personal_bonus_profit, max_amt - cumulative_amt);
+                                        double personal_bonus_wallet = Math.Round(bonusToAdd * 0.7, 2);
+                                        double personal_e_wallet = Math.Round(bonusToAdd - personal_bonus_wallet, 2);
 
-                                        string sqlstr = $"INSERT INTO performance_incentive(user_id, user_rank, meta_login, subscription_id, subscription_number, " +
+                                        string personalRemarks = "";
+                                        if (bonusToAdd > 0)
+                                        {
+                                            personalRemarks = cumulative_amt + bonusToAdd <= max_amt ?
+                                                $"Performance Incentive Bonus from {SubNum} of {personal_bonus_percent}% : ${Math.Round(bonusToAdd, 2)}" :
+                                                $"Performance Incentive Bonus from {SubNum} of {personal_bonus_percent}% : ${Math.Round(bonusToAdd, 2)} (Reached Max Amount)";
+
+                                            // Insert into wallet update logs
+                                            string bWalletRemark = $"Performance Incentive(bonus_wallet) => ${profit} * {personal_bonus_percent}% * 70% = ${personal_bonus_wallet} {(cumulative_amt + bonusToAdd > max_amt ? "(Reached Max Amount)" : "")}";
+                                            insert_wallet_update_log(0, MetaLogin, UserId, personal_bonus_wallet, "bonus_wallet", "PerformanceIncentive", bWalletRemark, SubNum, "Performance Incentive");
+
+                                            string eWalletRemark = $"Performance Incentive(e_wallet) => ${profit} * {personal_bonus_percent}% * 30% = ${personal_e_wallet} {(cumulative_amt + bonusToAdd > max_amt ? "(Reached Max Amount)" : "")}";
+                                            insert_wallet_update_log(0, MetaLogin, UserId, personal_e_wallet, "e_wallet", "PerformanceIncentive", eWalletRemark, SubNum, "Performance Incentive");
+
+                                            string sqlstr = $"UPDATE subscriptions SET cumulative_amount = ROUND({cumulative_amt}, 2), updated_at = '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' " +
+                                                     $"WHERE deleted_at is null and type = 'PAMM' and subscription_number = '{SubNum}' and user_id = {UserId} " +
+                                                     $"and (claimed_profit not in ('Claimed') or claimed_profit is null ) and id > 0";
+                                            Console.WriteLine($"insert_update_incentive_n_hist 1 sqlstr : {sqlstr}");
+                                            MySqlCommand updateSub_cmd = new MySqlCommand(sqlstr, sql_conn);
+                                            updateSub_cmd.ExecuteScalar();
+                                        }
+                                        else
+                                        {
+                                            personalRemarks = $"No Performance Incentive Bonus from {SubNum} (Reached Max Amount)";
+                                        }
+
+                                        string sqlstr2 = $"INSERT INTO performance_incentive(user_id, user_rank, meta_login, subscription_id, subscription_number, " +
                                                         $" subscription_profit_amt, personal_bonus_percent, personal_bonus_amt, bonus_wallet_amt, e_wallet_amt, remarks, created_at) VALUES ( " +
                                                         $"{UserId}, {UserRank}, {MetaLogin}, {SubId}, '{SubNum}', {profit}, {personal_bonus_percent}, " +
                                                         $" ROUND({personal_bonus_profit},2), ROUND({personal_bonus_wallet},2), ROUND({personal_e_wallet},2), " +
                                                         $"'{personalRemarks}', '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}'); ";
-
-                                        string WalletRemark = $"Performance Incentive(bonus_wallet) => ${profit} * {personal_bonus_percent}% * 70% = ${personal_bonus_wallet}";
-                                        insert_wallet_update_log(0, MetaLogin, UserId, personal_bonus_wallet, "bonus_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive");
-
-                                        WalletRemark = $"Performance Incentive(e_wallet) => ${profit} * {personal_bonus_percent}% * 30% = ${personal_e_wallet}";
-                                        insert_wallet_update_log(0, MetaLogin, UserId, personal_e_wallet, "e_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive");
-
-                                        Console.WriteLine($"insert_update_subsciption_n_profit_hist 0 sqlstr : {sqlstr}");
-                                        MySqlCommand insert_cmd = new MySqlCommand(sqlstr, sql_conn);
+                                        Console.WriteLine($"insert_update_incentive_n_hist 0 sqlstr : {sqlstr2}");
+                                        MySqlCommand insert_cmd = new MySqlCommand(sqlstr2, sql_conn);
                                         insert_cmd.ExecuteScalar();
                                     }
                                 }
@@ -500,48 +506,83 @@ namespace LuckyAnt
 
                                         if (uplineRank > lastRank)
                                         {
-                                            MySqlConnection innerSql_conn2 = new MySqlConnection(conn);
-                                            innerSql_conn2.Open();
-                                            string affiliateEarningQuery = $"SELECT profit_bonus_percent from setting_ranks where position = {uplineRank};";
-                                            MySqlCommand select_cmd = new MySqlCommand(affiliateEarningQuery, innerSql_conn2);
-                                            double uplinePercent = (double)select_cmd.ExecuteScalar();
-                                            double actualPercent = uplinePercent - lastPercent;
-                                            double upline_bonus_profit = Math.Round(profit * (actualPercent / 100), 2);
-                                            double upline_bonus_wallet = Math.Round(upline_bonus_profit * 70 / 100, 2);
-                                            double upline_e_wallet = Math.Round(upline_bonus_profit - upline_bonus_wallet, 2);
-
-                                            lastPercent = uplinePercent;
-                                            lastRank = uplineRank;
-                                            string uplineRemarks = $"Performance Incentive Bonus from {SubNum} of {actualPercent}% : ${Math.Round(upline_bonus_profit, 2)}";
-                                            Console.WriteLine($"Upline Remark : {uplineRemarks}");
-                                            try
+                                            using (MySqlConnection innerSql_conn2 = new MySqlConnection(conn))
                                             {
-                                                using (MySqlConnection sql_conn = new MySqlConnection(conn))
+                                                innerSql_conn2.Open();
+                                                string affiliateEarningQuery = $"SELECT profit_bonus_percent from setting_ranks where position = {uplineRank};";
+                                                MySqlCommand select_cmd = new MySqlCommand(affiliateEarningQuery, innerSql_conn2);
+                                                double uplinePercent = (double)select_cmd.ExecuteScalar();
+                                                double actualPercent = uplinePercent - lastPercent;
+                                                double upline_bonus_profit = Math.Round(profit * (actualPercent / 100), 2);
+                                                double remaining_profit = upline_bonus_profit;
+
+                                                List<object[]> subscriptionList = new List<object[]>();
+                                                string sql_amt = $"SELECT subscription_number, cumulative_amount, max_out_amount FROM subscriptions WHERE deleted_at is null and user_id = {upline_id[cnt]} " +
+                                                    $"and type = 'PAMM' and cumulative_amount != max_out_amount ORDER BY approval_date; ";
+
+                                                Console.WriteLine($"retrieve_master_profit_percent sqlstr: {sql_amt}");
+                                                MySqlCommand amt_cmd = new MySqlCommand(sql_amt, innerSql_conn2);
+                                                MySqlDataReader reader = amt_cmd.ExecuteReader();
+                                                while (reader.Read())
                                                 {
-                                                    sql_conn.Open(); // Open the connection
-
-                                                    string sqlstr = $"INSERT INTO performance_incentive(user_id, user_rank, subscription_id, subscription_number, " +
-                                                                    $" subscription_profit_amt, personal_bonus_percent, personal_bonus_amt, bonus_wallet_amt, e_wallet_amt, remarks, created_at) VALUES ( " +
-                                                                    $"{upline_id[cnt]}, {uplineRank}, {SubId}, '{SubNum}', {profit}, {actualPercent}, " +
-                                                                    $" ROUND({upline_bonus_profit},2), ROUND({upline_bonus_wallet},2), ROUND({upline_e_wallet},2), " +
-                                                                    $"'{uplineRemarks}', '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}'); ";
-
-                                                    string WalletRemark = $"Performance Incentive(bonus_wallet) => ${profit} * {actualPercent}% * 70% = ${upline_bonus_wallet}";
-                                                    insert_wallet_update_log(0, MetaLogin, upline_id[cnt], upline_bonus_wallet, "bonus_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive");
-
-                                                    WalletRemark = $"Performance Incentive(e_wallet) => ${profit} * {actualPercent}% * 30% = ${upline_e_wallet}";
-                                                    insert_wallet_update_log(0, MetaLogin, upline_id[cnt], upline_e_wallet, "e_wallet", "PerformanceIncentive", WalletRemark, SubNum, "Performance Incentive");
-
-                                                    Console.WriteLine($"insert_update_subsciption_n_profit_hist 0 sqlstr : {sqlstr}");
-                                                    MySqlCommand insert_cmd = new MySqlCommand(sqlstr, sql_conn);
-                                                    insert_cmd.ExecuteScalar();
+                                                    object[] subscriptions = [reader.GetString(0), reader.GetDouble(1), reader.GetDouble(2)];
+                                                    subscriptionList.Add(subscriptions);
                                                 }
+                                                reader.Close();
+
+                                                foreach (var subscription in subscriptionList)
+                                                {
+                                                    string uplineSub = (string)subscription[0];
+                                                    double upline_max_amt = (double)subscription[1];
+                                                    double upline_cumulative_amt = (double)subscription[2];
+
+                                                    double bonusToAdd = Math.Min(remaining_profit, upline_max_amt - upline_cumulative_amt);
+                                                    double upline_bonus_wallet = Math.Round(bonusToAdd * 70 / 100, 2);
+                                                    double upline_e_wallet = Math.Round(upline_bonus_profit - upline_bonus_wallet, 2);
+
+                                                    
+                                                    string uplineRemarks = "";
+                                                    if (remaining_profit > 0)
+                                                    {
+                                                        if (bonusToAdd > 0)
+                                                        {
+                                                            uplineRemarks = cumulative_amt + bonusToAdd <= max_amt ?
+                                                                $"Performance Incentive Bonus from {SubNum} of {actualPercent}% : ${Math.Round(bonusToAdd, 2)}" :
+                                                                $"Performance Incentive Bonus from {SubNum} of {actualPercent}% : ${Math.Round(bonusToAdd, 2)} (Reached Max Amount)";
+
+                                                            // Insert into wallet update logs
+                                                            string bWalletRemark = $"Performance Incentive(bonus_wallet) => ${profit} * {actualPercent}% * 70% = ${upline_bonus_wallet} {(cumulative_amt + bonusToAdd > max_amt ? "(Reached Max Amount)" : "")}";
+                                                            insert_wallet_update_log(0, MetaLogin, upline_id[cnt], upline_bonus_wallet, "bonus_wallet", "PerformanceIncentive", bWalletRemark, SubNum, "Performance Incentive");
+
+                                                            string eWalletRemark = $"Performance Incentive(e_wallet) => ${profit} * {actualPercent}% * 30% = ${upline_e_wallet} {(cumulative_amt + bonusToAdd > max_amt ? "(Reached Max Amount)" : "")}";
+                                                            insert_wallet_update_log(0, MetaLogin, upline_id[cnt], upline_e_wallet, "e_wallet", "PerformanceIncentive", eWalletRemark, SubNum, "Performance Incentive");
+
+                                                            string sqlstr = $"UPDATE subscriptions SET cumulative_amount = ROUND({cumulative_amt}, 2), updated_at = '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' " +
+                                                                     $"WHERE deleted_at is null and type = 'PAMM' and subscription_number = '{uplineSub}' and user_id = {upline_id[cnt]} " +
+                                                                     $"and (claimed_profit not in ('Claimed') or claimed_profit is null ) and id > 0";
+                                                            Console.WriteLine($"insert_update_incentive_n_hist 1 sqlstr : {sqlstr}");
+                                                            MySqlCommand updateSub_cmd = new MySqlCommand(sqlstr, innerSql_conn2);
+                                                            updateSub_cmd.ExecuteScalar();
+                                                        }
+                                                        else
+                                                        {
+                                                            uplineRemarks = $"No Performance Incentive Bonus from {SubNum} (Reached Max Amount)";
+                                                        }
+
+                                                        string sqlstr2 = $"INSERT INTO performance_incentive(user_id, user_rank, subscription_id, subscription_number, " +
+                                                                        $" subscription_profit_amt, personal_bonus_percent, personal_bonus_amt, bonus_wallet_amt, e_wallet_amt, remarks, created_at) VALUES ( " +
+                                                                        $"{upline_id[cnt]}, {uplineRank}, {SubId}, '{SubNum}', {profit}, {actualPercent}, " +
+                                                                        $" ROUND({upline_bonus_profit},2), ROUND({upline_bonus_wallet},2), ROUND({upline_e_wallet},2), " +
+                                                                        $"'{uplineRemarks}', '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}'); ";
+                                                        Console.WriteLine($"insert_update_incentive_n_hist 0 sqlstr : {sqlstr2}");
+                                                        MySqlCommand insert_cmd = new MySqlCommand(sqlstr2, innerSql_conn2);
+                                                        insert_cmd.ExecuteScalar();
+                                                    }
+                                                    remaining_profit -= bonusToAdd;
+                                                }
+                                                lastPercent = uplinePercent;
+                                                lastRank = uplineRank;
                                             }
-                                            catch (Exception ex)
-                                            {
-                                                Console.WriteLine("Error sending message: " + ex.Message);
-                                            }
-                                            innerSql_conn2.Close();
                                         }
                                         innerSql_conn.Close();
                                     }
@@ -557,7 +598,7 @@ namespace LuckyAnt
                 }
                 else
                 {
-                    Console.WriteLine("No penalty is currently available.");
+                    Console.WriteLine("No incentive is currently available.");
                 }
             }
             catch (Exception ex)
@@ -669,6 +710,8 @@ namespace LuckyAnt
             long MetaLogin = (long)sub_info[3];
             long SubId = (long)sub_info[4];
             long MasterId = (long)sub_info[9];
+            double cumulative_amt = (double)sub_info[10];
+            double max_amt = (double)sub_info[11];
             string SubNum = (string)sub_info[0];
             double sharing_profit = 0; double market_profit = 0; double company_profit = 0; double personal_bonus_profit = 0;
             double bonus_wallet = 0; double e_wallet = 0;
@@ -706,8 +749,17 @@ namespace LuckyAnt
                         insert_wallet_update_log(deal_id, MetaLogin, UserId, sharing_profit, "cash_wallet", "ProfitSharing", WalletRemark, SubNum, "Settlement of Profit");
                     }
 
-                    sqlstr = $"UPDATE subscriptions SET claimed_profit = 'Claimed', updated_at = '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' " +
-                             $"WHERE deleted_at is null and type = 'CopyTrade' and subscription_number = '{SubNum}' and user_id = {UserId} " +
+                    if (cumulative_amt + sharing_profit <= max_amt)
+                    {
+                        cumulative_amt += sharing_profit;
+                    }
+                    else
+                    {
+                        cumulative_amt = max_amt;
+                    }
+
+                    sqlstr = $"UPDATE subscriptions SET cumulative_amount = ROUND({cumulative_amt}, 2), claimed_profit = 'Claimed', updated_at = '{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}' " +
+                             $"WHERE deleted_at is null and type = 'PAMM' and subscription_number = '{SubNum}' and user_id = {UserId} " +
                              $"and (claimed_profit not in ('Claimed') or claimed_profit is null ) and id > 0";
                     Console.WriteLine($"insert_update_subsciption_n_profit_hist 2 sqlstr : {sqlstr}");
                     MySqlCommand updateSub_cmd = new MySqlCommand(sqlstr, sql_conn);
@@ -721,7 +773,7 @@ namespace LuckyAnt
 
         }
 
-        private static void exist_records_MT5_Deal(CIMTManagerAPI mManager, List<ulong> metaLogin, string s_keyword, string p_keyword, ref List<object[]> exist_trade, ref bool status_mt5)
+        private static void exist_records_MT5_Deal(CIMTManagerAPI mManager, List<ulong> metaLogin, string s_keyword, ref List<object[]> exist_trade, ref bool status_mt5)
         {
             Console.WriteLine($"retrieve_MT5_Deal ... ");
             try
@@ -789,24 +841,6 @@ namespace LuckyAnt
                                 Console.WriteLine($"Deal: {Deal} - Action: {Action} - dt_Timestamp: {dt_Timestamp.ToString("yyyy-MM-dd HH:mm:ss")} - Profit: {Profit} - Commment: {Commment}");
                             }
 
-                            if (Commment.Contains(p_keyword))
-                            {
-                                var existingTrade = exist_trade.FirstOrDefault(trade => (ulong)trade[0] == Login && (string)trade[1] == p_keyword);
-                                if (existingTrade != null)
-                                {
-                                    // Update existing entry
-                                    if ((bool)existingTrade[2] == false) existingTrade[2] = true;
-                                    existingTrade[3] = ((long)Count) + 1;
-                                    existingTrade[4] = ((double)existingTrade[4]) + Profit;
-                                }
-                                else
-                                {
-                                    // Add new entry
-                                    object[] tradeData = { Login, Commment, true, Count, Profit, Deal };
-                                    exist_trade.Add(tradeData);
-                                }
-                                Console.WriteLine($"Deal: {Deal} - Action: {Action} - dt_Timestamp: {dt_Timestamp.ToString("yyyy-MM-dd HH:mm:ss")} - Profit: {Profit} - Commment: {Commment}");
-                            }
                             m_Deal.Release();
                         }
                     }
