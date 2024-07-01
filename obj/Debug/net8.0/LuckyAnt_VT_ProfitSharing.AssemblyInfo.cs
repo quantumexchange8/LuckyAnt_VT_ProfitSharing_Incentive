@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("LuckyAnt_VT_ProfitSharing")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d4b1b3ef572e3e30e32537f09a7bc3f5a7b3a008")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5e29c3fa84460aebbce43b8d001a9d3f2d8c3753")]
 [assembly: System.Reflection.AssemblyProductAttribute("LuckyAnt_VT_ProfitSharing")]
 [assembly: System.Reflection.AssemblyTitleAttribute("LuckyAnt_VT_ProfitSharing")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
