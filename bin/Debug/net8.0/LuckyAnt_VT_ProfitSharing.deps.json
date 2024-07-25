@@ -11,8 +11,8 @@
           "MySql.Data": "8.0.27",
           "Telegram": "1.0.1",
           "Telegram.Bot": "19.0.0",
-          "MetaQuotes.MT5CommonAPI64": "5.2715.0.0",
-          "MetaQuotes.MT5ManagerAPI64": "5.2715.0.0"
+          "MetaQuotes.MT5CommonAPI64": "5.4410.0.0",
+          "MetaQuotes.MT5ManagerAPI64": "5.4410.0.0"
         },
         "runtime": {
           "LuckyAnt_VT_ProfitSharing.dll": {}
@@ -255,19 +255,19 @@
           }
         }
       },
-      "MetaQuotes.MT5CommonAPI64/5.2715.0.0": {
+      "MetaQuotes.MT5CommonAPI64/5.4410.0.0": {
         "runtime": {
           "MetaQuotes.MT5CommonAPI64.dll": {
-            "assemblyVersion": "5.2715.0.0",
-            "fileVersion": "5.0.0.2733"
+            "assemblyVersion": "5.4410.0.0",
+            "fileVersion": "5.0.0.4410"
           }
         }
       },
-      "MetaQuotes.MT5ManagerAPI64/5.2715.0.0": {
+      "MetaQuotes.MT5ManagerAPI64/5.4410.0.0": {
         "runtime": {
           "MetaQuotes.MT5ManagerAPI64.dll": {
-            "assemblyVersion": "5.2715.0.0",
-            "fileVersion": "5.0.0.2733"
+            "assemblyVersion": "5.4410.0.0",
+            "fileVersion": "5.0.0.4410"
           }
         }
       }
@@ -440,12 +440,12 @@
       "path": "tlschema/1.1.0",
       "hashPath": "tlschema.1.1.0.nupkg.sha512"
     },
-    "MetaQuotes.MT5CommonAPI64/5.2715.0.0": {
+    "MetaQuotes.MT5CommonAPI64/5.4410.0.0": {
       "type": "reference",
       "serviceable": false,
       "sha512": ""
     },
-    "MetaQuotes.MT5ManagerAPI64/5.2715.0.0": {
+    "MetaQuotes.MT5ManagerAPI64/5.4410.0.0": {
       "type": "reference",
       "serviceable": false,
       "sha512": ""

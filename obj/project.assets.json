@@ -1032,11 +1032,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Admin\\Desktop\\New folder\\LuckyAnt_VT_ProfitSharing_Incentive\\LuckyAnt_VT_ProfitSharing.csproj",
+      "projectUniqueName": "C:\\Users\\Admin\\Desktop\\LuckyAnt-Folder\\LuckyAnt-VT-ProfitSharing\\LuckyAnt_VT_ProfitSharing_Incentive\\LuckyAnt_VT_ProfitSharing.csproj",
       "projectName": "LuckyAnt_VT_ProfitSharing",
-      "projectPath": "C:\\Users\\Admin\\Desktop\\New folder\\LuckyAnt_VT_ProfitSharing_Incentive\\LuckyAnt_VT_ProfitSharing.csproj",
+      "projectPath": "C:\\Users\\Admin\\Desktop\\LuckyAnt-Folder\\LuckyAnt-VT-ProfitSharing\\LuckyAnt_VT_ProfitSharing_Incentive\\LuckyAnt_VT_ProfitSharing.csproj",
       "packagesPath": "C:\\Users\\Admin\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Admin\\Desktop\\New folder\\LuckyAnt_VT_ProfitSharing_Incentive\\obj\\",
+      "outputPath": "C:\\Users\\Admin\\Desktop\\LuckyAnt-Folder\\LuckyAnt-VT-ProfitSharing\\LuckyAnt_VT_ProfitSharing_Incentive\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
